@@ -373,6 +373,18 @@
             }
         }
 
+        // ===== AUTO-SYNC =====
+        // Refresh data every 30 seconds
+        setInterval(() => { if (getScriptUrl()) loadTrips(); }, 30000);
+
+        // Refresh when app comes back to foreground (user switches back to app)
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden && getScriptUrl()) loadTrips();
+        });
+
+        // Refresh on page focus
+        window.addEventListener('focus', () => { if (getScriptUrl()) loadTrips(); });
+
         // ===== UI =====
         function toggleRider(el) {
             const cb = el.querySelector('input');
@@ -385,6 +397,7 @@
             document.querySelectorAll('.tabs button').forEach(el => el.classList.remove('active'));
             document.getElementById('tab-' + tab).classList.add('active');
             e.target.classList.add('active');
+            loadTrips(); // Always sync when switching tabs
             if (tab === 'history') renderHistory();
             if (tab === 'summary') { populateMonths(); renderSummary(); }
             if (tab === 'tracker') renderTracker();
