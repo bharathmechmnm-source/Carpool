@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Carpool Tracker</title>
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#667eea">
+    <link rel="manifest" href="./manifest.json">
+    <link rel="apple-touch-icon" href="./icon-192.png">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh; padding: 16px;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .container {
+            background: #fff; border-radius: 20px; padding: 24px 18px;
+            width: 100%; max-width: 420px; margin: 0 auto;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+        h1 { text-align: center; color: #333; font-size: 1.3rem; margin-bottom: 3px; }
+        .subtitle { text-align: center; color: #888; font-size: 0.75rem; margin-bottom: 18px; }
+
+        .tabs { display: flex; background: #f0f0f0; border-radius: 10px; padding: 3px; margin-bottom: 18px; }
+        .tabs button {
+            flex: 1; padding: 9px 4px; background: transparent; color: #666;
+            font-size: 0.72rem; border: none; border-radius: 8px; font-weight: 600; cursor: pointer;
+        }
+        .tabs button.active { background: #fff; color: #333; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+
+        .input-group { margin-bottom: 14px; }
+        label { display: block; font-size: 0.78rem; color: #555; margin-bottom: 5px; font-weight: 600; }
+        input, select {
+            width: 100%; padding: 11px 13px; border: 2px solid #e8e8e8;
+            border-radius: 10px; font-size: 0.9rem; outline: none; transition: border-color 0.3s;
+            -webkit-appearance: none;
+        }
+        input:focus, select:focus { border-color: #667eea; }
+        .row { display: flex; gap: 10px; }
+        .row .input-group { flex: 1; }
+
+        .btn-primary {
+            width: 100%; padding: 13px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #fff; border: none; border-radius: 12px; font-size: 0.95rem;
+            font-weight: 600; cursor: pointer; margin-top: 8px;
+        }
+        .btn-primary:active { transform: scale(0.97); }
+        .btn-secondary {
+            width: 100%; padding: 11px; background: #f0f0f0; color: #555;
+            border: none; border-radius: 10px; font-size: 0.82rem; font-weight: 500;
+            cursor: pointer; margin-top: 8px;
+        }
+
+        .rider-checkboxes { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+        .rider-check {
+            display: flex; align-items: center; gap: 6px;
+            background: #f0f0f0; padding: 8px 14px; border-radius: 20px; cursor: pointer;
+            transition: all 0.2s; user-select: none;
+        }
+        .rider-check.checked { background: #667eea; color: #fff; }
+        .rider-check input { display: none; }
+        .rider-check span { font-size: 0.82rem; font-weight: 500; }
+
+        .trip-item {
+            background: #f8f9ff; border-radius: 10px; padding: 12px; margin-bottom: 8px;
+            border: 1px solid #e8edff;
+        }
+        .trip-item .date { font-size: 0.7rem; color: #999; margin-bottom: 3px; }
+        .trip-item .info { font-size: 0.8rem; color: #444; line-height: 1.5; }
+        .trip-item .riders { font-size: 0.75rem; color: #667eea; font-weight: 600; margin-top: 3px; }
+        .trip-item .cost { font-weight: 700; color: #333; }
+
+        .summary-card {
+            background: #f8f9ff; border-radius: 12px; padding: 14px;
+            border: 1px solid #e8edff; margin-bottom: 10px;
+        }
+        .summary-card h3 { font-size: 0.82rem; color: #555; margin-bottom: 8px; }
+        .summary-stat {
+            display: flex; justify-content: space-between; padding: 6px 0;
+            font-size: 0.82rem; color: #444; border-bottom: 1px solid #eee;
+        }
+        .summary-stat:last-child { border-bottom: none; }
+        .summary-stat .value { font-weight: 700; color: #667eea; }
+
+        .highlight-card {
+            text-align: center; padding: 16px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 12px; color: #fff; margin-bottom: 12px;
+        }
+        .highlight-card .label { font-size: 0.72rem; opacity: 0.85; }
+        .highlight-card .amount { font-size: 1.6rem; font-weight: 700; margin-top: 3px; }
+
+        .empty-state { text-align: center; color: #999; padding: 25px; font-size: 0.82rem; }
+        .trip-list { max-height: 380px; overflow-y: auto; }
+
+        .status-bar {
+            text-align: center; font-size: 0.7rem; padding: 6px;
+            border-radius: 8px; margin-bottom: 12px;
+        }
+        .status-online { background: #d4edda; color: #155724; }
+        .status-offline { background: #fff3cd; color: #856404; }
+        .status-error { background: #f8d7da; color: #721c24; }
+
+        .setup-box {
+            background: #fff9e6; border: 2px solid #ffd700; border-radius: 12px;
+            padding: 16px; margin-bottom: 16px;
+        }
+        .setup-box h3 { font-size: 0.85rem; color: #333; margin-bottom: 8px; }
+        .setup-box p { font-size: 0.75rem; color: #555; line-height: 1.5; margin-bottom: 8px; }
+
+        .install-banner {
+            display: none; background: #e8edff; border-radius: 10px; padding: 12px;
+            margin-bottom: 14px; text-align: center; font-size: 0.78rem; color: #444;
+        }
+        .install-banner button {
+            background: #667eea; color: #fff; border: none; padding: 8px 16px;
+            border-radius: 8px; font-weight: 600; cursor: pointer; margin-top: 6px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚗 Carpool Tracker</h1>
+        <p class="subtitle">Kabar • Bharath • Arjun • Divya</p>
+
+        <!-- Install banner -->
+        <div class="install-banner" id="installBanner">
+            📱 Install this app on your phone for quick access!
+            <br><button onclick="installApp()">Install App</button>
+        </div>
+
+        <div id="statusBar" class="status-bar status-online">● Connected</div>
+
+        <!-- Setup -->
+        <div id="setupSection" style="display:none;">
+            <div class="setup-box">
+                <h3>⚙️ One-Time Setup</h3>
+                <p>Paste the Google Apps Script URL shared by your team admin.</p>
+                <input type="text" id="scriptUrl" placeholder="https://script.google.com/macros/s/...">
+                <button class="btn-primary" onclick="saveScriptUrl()">Save & Connect</button>
+            </div>
+        </div>
+
+        <!-- Main App -->
+        <div id="mainApp">
+            <div class="tabs">
+                <button class="active" onclick="switchTab(event,'log')">Log Trip</button>
+                <button onclick="switchTab(event,'history')">History</button>
+                <button onclick="switchTab(event,'summary')">Monthly</button>
+                <button onclick="switchTab(event,'tracker')">Tracker</button>
+            </div>
+
+            <!-- LOG -->
+            <div class="tab-content active" id="tab-log">
+                <div class="input-group">
+                    <label>Date</label>
+                    <input type="date" id="tripDate">
+                </div>
+                <div class="input-group">
+                    <label>Who commuted today?</label>
+                    <div class="rider-checkboxes" id="riderCheckboxes">
+                        <label class="rider-check checked" onclick="toggleRider(this)">
+                            <input type="checkbox" value="Kabar" checked><span>Kabar</span>
+                        </label>
+                        <label class="rider-check checked" onclick="toggleRider(this)">
+                            <input type="checkbox" value="Bharath" checked><span>Bharath</span>
+                        </label>
+                        <label class="rider-check checked" onclick="toggleRider(this)">
+                            <input type="checkbox" value="Arjun" checked><span>Arjun</span>
+                        </label>
+                        <label class="rider-check checked" onclick="toggleRider(this)">
+                            <input type="checkbox" value="Divya" checked><span>Divya</span>
+                        </label>
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="input-group">
+                        <label>Distance (km one-way)</label>
+                        <input type="number" id="distance" placeholder="e.g. 25" inputmode="decimal">
+                    </div>
+                    <div class="input-group">
+                        <label>Trip Type</label>
+                        <select id="tripType">
+                            <option value="round">Round Trip</option>
+                            <option value="one">One Way</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="input-group">
+                        <label>Fuel Price (₹/L)</label>
+                        <input type="number" id="fuelPrice" placeholder="102" inputmode="decimal">
+                    </div>
+                    <div class="input-group">
+                        <label>Mileage (km/L)</label>
+                        <input type="number" id="mileage" placeholder="15" inputmode="decimal">
+                    </div>
+                </div>
+                <div class="input-group">
+                    <label>Toll / Parking (₹)</label>
+                    <input type="number" id="extras" value="0" inputmode="decimal">
+                </div>
+                <div class="input-group">
+                    <label>Driver</label>
+                    <select id="driver">
+                        <option value="Kabar">Kabar</option>
+                        <option value="Bharath">Bharath</option>
+                        <option value="Arjun">Arjun</option>
+                        <option value="Divya">Divya</option>
+                    </select>
+                </div>
+                <button class="btn-primary" onclick="saveTrip()">Save Trip</button>
+                <div id="saveConfirm" style="display:none; text-align:center; margin-top:12px; font-weight:600; font-size:0.85rem;"></div>
+            </div>
+
+            <!-- HISTORY -->
+            <div class="tab-content" id="tab-history">
+                <button class="btn-secondary" onclick="loadTrips()">🔄 Refresh</button>
+                <div class="trip-list" id="tripList" style="margin-top:10px;">
+                    <div class="empty-state">Loading...</div>
+                </div>
+            </div>
+
+            <!-- MONTHLY -->
+            <div class="tab-content" id="tab-summary">
+                <div class="input-group">
+                    <label>Select Month</label>
+                    <select id="summaryMonth" onchange="renderSummary()"></select>
+                </div>
+                <div id="summaryContent"><div class="empty-state">Loading...</div></div>
+            </div>
+
+            <!-- TRACKER -->
+            <div class="tab-content" id="tab-tracker">
+                <div id="trackerContent"><div class="empty-state">Loading...</div></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const MEMBERS = ['Kabar', 'Bharath', 'Arjun', 'Divya'];
+        let allTrips = [];
+        let deferredPrompt = null;
+
+        // ===== PWA INSTALL =====
+        window.addEventListener('beforeinstallprompt', (e) => {
+            e.preventDefault();
+            deferredPrompt = e;
+            document.getElementById('installBanner').style.display = 'block';
+        });
+
+        function installApp() {
+            if (deferredPrompt) {
+                deferredPrompt.prompt();
+                deferredPrompt.userChoice.then(() => {
+                    deferredPrompt = null;
+                    document.getElementById('installBanner').style.display = 'none';
+                });
+            }
+        }
+
+        // Register Service Worker
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('./sw.js');
+        }
+
+        // ===== CONFIG =====
+        document.getElementById('tripDate').valueAsDate = new Date();
+
+        function getScriptUrl() { return localStorage.getItem('carpoolScriptUrl') || ''; }
+        function saveScriptUrl() {
+            const url = document.getElementById('scriptUrl').value.trim();
+            if (!url) { alert('Please paste the URL'); return; }
+            localStorage.setItem('carpoolScriptUrl', url);
+            document.getElementById('setupSection').style.display = 'none';
+            init();
+        }
+
+        function setStatus(text, type) {
+            const bar = document.getElementById('statusBar');
+            bar.textContent = (type === 'online' ? '● ' : type === 'error' ? '✕ ' : '◐ ') + text;
+            bar.className = 'status-bar status-' + type;
+        }
+
+        function init() {
+            const url = getScriptUrl();
+            if (!url) {
+                document.getElementById('setupSection').style.display = 'block';
+                setStatus('Setup required', 'offline');
+                return;
+            }
+            loadTrips();
+        }
+
+        // ===== API =====
+        async function loadTrips() {
+            const url = getScriptUrl();
+            if (!url) return;
+            setStatus('Syncing...', 'offline');
+            try {
+                const res = await fetch(url + '?action=getAll');
+                const data = await res.json();
+                allTrips = data.trips || [];
+                localStorage.setItem('carpoolTripsLocal', JSON.stringify(allTrips));
+                setStatus('Connected • ' + allTrips.length + ' trips', 'online');
+                renderHistory();
+            } catch (e) {
+                setStatus('Offline mode', 'error');
+                allTrips = JSON.parse(localStorage.getItem('carpoolTripsLocal') || '[]');
+                renderHistory();
+            }
+        }
+
+        async function saveTrip() {
+            const date = document.getElementById('tripDate').value;
+            const distance = parseFloat(document.getElementById('distance').value);
+            const fuelPrice = parseFloat(document.getElementById('fuelPrice').value);
+            const mileage = parseFloat(document.getElementById('mileage').value);
+            const extras = parseFloat(document.getElementById('extras').value) || 0;
+            const tripType = document.getElementById('tripType').value;
+            const driver = document.getElementById('driver').value;
+
+            const riders = [];
+            document.querySelectorAll('#riderCheckboxes input:checked').forEach(cb => riders.push(cb.value));
+
+            if (!date || !distance || !fuelPrice || !mileage) {
+                alert('Please fill date, distance, fuel price, and mileage'); return;
+            }
+            if (riders.length === 0) { alert('Select at least one rider'); return; }
+
+            const totalDist = tripType === 'round' ? distance * 2 : distance;
+            const fuelCost = (totalDist / mileage) * fuelPrice;
+            const totalCost = fuelCost + extras;
+            const perPerson = totalCost / riders.length;
+
+            const trip = {
+                id: Date.now(), date, distance: totalDist, fuelPrice, mileage, extras,
+                fuelCost, totalCost, perPerson, riders: riders.join(','), driver, tripType
+            };
+
+            const url = getScriptUrl();
+            const conf = document.getElementById('saveConfirm');
+
+            try {
+                setStatus('Saving...', 'offline');
+                const res = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'text/plain' },
+                    body: JSON.stringify({ action: 'addTrip', trip })
+                });
+                const result = await res.json();
+                if (result.status === 'ok') {
+                    conf.style.display = 'block';
+                    conf.textContent = `✅ Saved! ₹${perPerson.toFixed(0)}/person (${riders.length} riders)`;
+                    conf.style.color = '#27ae60';
+                    setTimeout(() => conf.style.display = 'none', 3000);
+                    loadTrips();
+                }
+            } catch (e) {
+                allTrips.push({...trip, riders: riders});
+                localStorage.setItem('carpoolTripsLocal', JSON.stringify(allTrips));
+                conf.style.display = 'block';
+                conf.textContent = '⚠️ Saved locally (will sync when online)';
+                conf.style.color = '#856404';
+                setTimeout(() => conf.style.display = 'none', 4000);
+                setStatus('Offline mode', 'error');
+            }
+        }
+
+        // ===== UI =====
+        function toggleRider(el) {
+            const cb = el.querySelector('input');
+            cb.checked = !cb.checked;
+            el.classList.toggle('checked', cb.checked);
+        }
+
+        function switchTab(e, tab) {
+            document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('.tabs button').forEach(el => el.classList.remove('active'));
+            document.getElementById('tab-' + tab).classList.add('active');
+            e.target.classList.add('active');
+            if (tab === 'history') renderHistory();
+            if (tab === 'summary') { populateMonths(); renderSummary(); }
+            if (tab === 'tracker') renderTracker();
+        }
+
+        function parseRiders(r) { return typeof r === 'string' ? r.split(',') : r; }
+
+        // ===== HISTORY =====
+        function renderHistory() {
+            const container = document.getElementById('tripList');
+            if (allTrips.length === 0) {
+                container.innerHTML = '<div class="empty-state">No trips logged yet.</div>'; return;
+            }
+            container.innerHTML = allTrips.slice().reverse().map(t => {
+                const d = new Date(t.date + 'T00:00:00');
+                const dateStr = d.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' });
+                const riders = parseRiders(t.riders);
+                return `<div class="trip-item">
+                    <div class="date">${dateStr} • ${t.distance} km • Driver: ${t.driver}</div>
+                    <div class="info">Total: <span class="cost">₹${parseFloat(t.totalCost).toFixed(0)}</span> • <span class="cost">₹${parseFloat(t.perPerson).toFixed(0)}/person</span></div>
+                    <div class="riders">🚙 ${riders.join(', ')}</div>
+                </div>`;
+            }).join('');
+        }
+
+        // ===== MONTHLY =====
+        function populateMonths() {
+            const select = document.getElementById('summaryMonth');
+            const months = new Set();
+            allTrips.forEach(t => { const [y, m] = t.date.split('-'); months.add(y + '-' + m); });
+            const sorted = [...months].sort().reverse();
+            if (sorted.length === 0) { select.innerHTML = '<option>No data</option>'; return; }
+            select.innerHTML = sorted.map(m => {
+                const [y, mo] = m.split('-');
+                const label = new Date(y, mo - 1).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
+                return `<option value="${m}">${label}</option>`;
+            }).join('');
+        }
+
+        function renderSummary() {
+            const container = document.getElementById('summaryContent');
+            const selected = document.getElementById('summaryMonth').value;
+            if (!selected || selected === 'No data') {
+                container.innerHTML = '<div class="empty-state">No data yet.</div>'; return;
+            }
+            const monthTrips = allTrips.filter(t => t.date.startsWith(selected));
+            if (monthTrips.length === 0) {
+                container.innerHTML = '<div class="empty-state">No trips this month.</div>'; return;
+            }
+
+            const totalCost = monthTrips.reduce((s, t) => s + parseFloat(t.totalCost), 0);
+            const totalDist = monthTrips.reduce((s, t) => s + parseFloat(t.distance), 0);
+
+            const personOwes = {}, personRides = {}, personDrove = {};
+            MEMBERS.forEach(m => { personOwes[m] = 0; personRides[m] = 0; personDrove[m] = 0; });
+
+            monthTrips.forEach(t => {
+                const riders = parseRiders(t.riders);
+                const pp = parseFloat(t.perPerson);
+                riders.forEach(r => { personOwes[r] = (personOwes[r]||0) + pp; personRides[r] = (personRides[r]||0) + 1; });
+                personDrove[t.driver] = (personDrove[t.driver]||0) + 1;
+            });
+
+            container.innerHTML = `
+                <div class="highlight-card">
+                    <div class="label">Total Month Expense</div>
+                    <div class="amount">₹${totalCost.toFixed(0)}</div>
+                </div>
+                <div class="summary-card">
+                    <h3>Overview</h3>
+                    <div class="summary-stat"><span>Total Trips</span><span class="value">${monthTrips.length}</span></div>
+                    <div class="summary-stat"><span>Total Distance</span><span class="value">${totalDist.toFixed(0)} km</span></div>
+                </div>
+                <div class="summary-card">
+                    <h3>💰 Each Person Owes (rides taken)</h3>
+                    ${MEMBERS.map(m => `<div class="summary-stat"><span>${m} (${personRides[m]} rides)</span><span class="value">₹${personOwes[m].toFixed(0)}</span></div>`).join('')}
+                </div>
+                <div class="summary-card">
+                    <h3>🚗 Who Drove</h3>
+                    ${MEMBERS.map(m => `<div class="summary-stat"><span>${m}</span><span class="value">${personDrove[m]} times</span></div>`).join('')}
+                </div>`;
+        }
+
+        // ===== TRACKER =====
+        function renderTracker() {
+            const container = document.getElementById('trackerContent');
+            if (allTrips.length === 0) {
+                container.innerHTML = '<div class="empty-state">No data yet.</div>'; return;
+            }
+
+            const totalCost = allTrips.reduce((s, t) => s + parseFloat(t.totalCost), 0);
+            const totalDist = allTrips.reduce((s, t) => s + parseFloat(t.distance), 0);
+
+            const personOwes = {}, personRides = {}, personDrove = {};
+            MEMBERS.forEach(m => { personOwes[m] = 0; personRides[m] = 0; personDrove[m] = 0; });
+
+            allTrips.forEach(t => {
+                const riders = parseRiders(t.riders);
+                const pp = parseFloat(t.perPerson);
+                riders.forEach(r => { personOwes[r] = (personOwes[r]||0) + pp; personRides[r] = (personRides[r]||0) + 1; });
+                personDrove[t.driver] = (personDrove[t.driver]||0) + 1;
+            });
+
+            const balance = {};
+            MEMBERS.forEach(m => {
+                const droveCost = allTrips.filter(t => t.driver === m).reduce((s,t) => s + parseFloat(t.totalCost), 0);
+                const ownShareWhenDriving = allTrips.filter(t => t.driver === m && parseRiders(t.riders).includes(m))
+                    .reduce((s,t) => s + parseFloat(t.perPerson), 0);
+                const paidForOthers = droveCost - ownShareWhenDriving;
+                const owesOthers = allTrips.filter(t => t.driver !== m && parseRiders(t.riders).includes(m))
+                    .reduce((s,t) => s + parseFloat(t.perPerson), 0);
+                balance[m] = owesOthers - paidForOthers;
+            });
+
+            container.innerHTML = `
+                <div class="highlight-card">
+                    <div class="label">All-Time Total</div>
+                    <div class="amount">₹${totalCost.toFixed(0)}</div>
+                </div>
+                <div class="summary-card">
+                    <h3>All-Time Stats</h3>
+                    <div class="summary-stat"><span>Total Trips</span><span class="value">${allTrips.length}</span></div>
+                    <div class="summary-stat"><span>Total Distance</span><span class="value">${totalDist.toFixed(0)} km</span></div>
+                </div>
+                <div class="summary-card">
+                    <h3>💰 Total Per Person</h3>
+                    ${MEMBERS.map(m => `<div class="summary-stat"><span>${m} (${personRides[m]} rides)</span><span class="value">₹${personOwes[m].toFixed(0)}</span></div>`).join('')}
+                </div>
+                <div class="summary-card">
+                    <h3>🚗 Drive Count</h3>
+                    ${MEMBERS.map(m => `<div class="summary-stat"><span>${m}</span><span class="value">${personDrove[m]} times</span></div>`).join('')}
+                </div>
+                <div class="summary-card">
+                    <h3>⚖️ Settlement Balance</h3>
+                    <p style="font-size:0.7rem;color:#888;margin-bottom:6px;">+ owes group | − is owed</p>
+                    ${MEMBERS.map(m => {
+                        const b = balance[m];
+                        const color = b > 0 ? '#ff4757' : '#27ae60';
+                        const sign = b >= 0 ? '+' : '';
+                        return `<div class="summary-stat"><span>${m}</span><span class="value" style="color:${color}">${sign}₹${b.toFixed(0)}</span></div>`;
+                    }).join('')}
+                </div>`;
+        }
+
+        // ===== START =====
+        init();
+    </script>
+</body>
+</html>
