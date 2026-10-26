@@ -140,7 +140,7 @@
         <!-- Setup -->
         <div id="setupSection" style="display:none;">
             <div class="setup-box">
-                <h3>⚙️ One-Time Setup</h3>
+                <h3>⚙️ Backend Setup</h3>
                 <p>Paste the Google Apps Script URL shared by your team admin.</p>
                 <input type="text" id="scriptUrl" placeholder="https://script.google.com/macros/s/...">
                 <button class="btn-primary" onclick="saveScriptUrl()">Save & Connect</button>
@@ -222,6 +222,7 @@
             <!-- HISTORY -->
             <div class="tab-content" id="tab-history">
                 <button class="btn-secondary" onclick="loadTrips()">🔄 Refresh</button>
+                <button class="btn-secondary" onclick="showSetup()">⚙️ Change Script URL</button>
                 <div class="trip-list" id="tripList" style="margin-top:10px;">
                     <div class="empty-state">Loading...</div>
                 </div>
@@ -247,6 +248,7 @@
         const MEMBERS = ['Kabar', 'Bharath', 'Arjun', 'Divya'];
         let allTrips = [];
         let deferredPrompt = null;
+        let syncInFlight = null; // only one loadTrips/sync at a time
 
         // ===== PWA INSTALL =====
         window.addEventListener('beforeinstallprompt', (e) => {
@@ -273,14 +275,31 @@
         // ===== CONFIG =====
         document.getElementById('tripDate').valueAsDate = new Date();
 
-        function getScriptUrl() { return localStorage.getItem('carpoolScriptUrl') || ''; }
+        // Built-in team backend; a URL saved via "Change Script URL" overrides it
+        const DEFAULT_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzliFd3h7JENOhaNhtC2tmOsekXLhHjACIaYsVnATAF5bPgFQy-BaLugfo54qzPWOVl2g/exec';
+        function getScriptUrl() { return localStorage.getItem('carpoolScriptUrl') || DEFAULT_SCRIPT_URL; }
         function saveScriptUrl() {
             const url = document.getElementById('scriptUrl').value.trim();
             if (!url) { alert('Please paste the URL'); return; }
-            localStorage.setItem('carpoolScriptUrl', url);
+            if (!/^https:\/\/script\.google\.com\/.+\/exec(\?.*)?$/.test(url)) {
+                alert('That doesn\'t look like a Web App URL. Use the Deploy > Web app URL ending in /exec (not /dev or the editor link).');
+                return;
+            }
+            localStorage.setItem('carpoolScriptUrl', url.split('?')[0]);
             document.getElementById('setupSection').style.display = 'none';
-            init();
+            // Wait for any sync still using the old URL, then connect with the new one
+            Promise.resolve(syncInFlight).then(init);
         }
+
+        function showSetup() {
+            document.getElementById('scriptUrl').value = getScriptUrl();
+            const section = document.getElementById('setupSection');
+            section.style.display = 'block';
+            section.scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function getPending() { return JSON.parse(localStorage.getItem('carpoolPendingTrips') || '[]'); }
+        function setPending(arr) { localStorage.setItem('carpoolPendingTrips', JSON.stringify(arr)); }
 
         function setStatus(text, type) {
             const bar = document.getElementById('statusBar');
@@ -288,7 +307,18 @@
             bar.className = 'status-bar status-' + type;
         }
 
+        // One-time upgrade: older builds kept failed saves in carpoolTripsLocal (riders as an array).
+        // Move them into the pending queue so they get sent instead of overwritten.
+        function migrateOldLocalTrips() {
+            if (localStorage.getItem('carpoolPendingTrips') !== null) return;
+            const local = JSON.parse(localStorage.getItem('carpoolTripsLocal') || '[]');
+            const old = local.filter(t => Array.isArray(t.riders));
+            setPending(old.map(t => ({ ...t, riders: t.riders.join(',') })));
+            localStorage.setItem('carpoolTripsLocal', JSON.stringify(local.filter(t => !Array.isArray(t.riders))));
+        }
+
         function init() {
+            migrateOldLocalTrips();
             const url = getScriptUrl();
             if (!url) {
                 document.getElementById('setupSection').style.display = 'block';
@@ -299,20 +329,108 @@
         }
 
         // ===== API =====
-        async function loadTrips() {
+        // Parse a backend response; throws a readable error if it isn't JSON
+        async function readJson(res) {
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            const text = await res.text();
+            try {
+                return JSON.parse(text);
+            } catch (e) {
+                throw new Error("Backend returned a web page, not data. Check the Apps Script deployment: Who has access = Anyone, and the URL ends in /exec");
+            }
+        }
+
+        // Only say "Offline" when the phone really is offline; otherwise show the real error
+        function reportFailure(e, pendingCount) {
+            console.error('Sync failed:', e);
+            const suffix = pendingCount > 0 ? ' • ' + pendingCount + ' pending' : '';
+            if (!navigator.onLine) {
+                setStatus('Offline mode' + suffix, 'error');
+            } else if (e instanceof TypeError) {
+                // fetch() network/CORS failure, e.g. redirected to a Google sign-in page
+                setStatus('Sync failed: can\'t reach backend. Check the Script URL and that access is "Anyone"' + suffix, 'error');
+            } else {
+                setStatus('Sync failed: ' + e.message + suffix, 'error');
+            }
+        }
+
+        async function fetchTrips(url) {
+            const res = await fetch(url + '?action=getAll', {
+                method: 'GET',
+                redirect: 'follow'
+            });
+            const data = await readJson(res);
+            if (data.status !== 'ok') throw new Error(data.message || 'Load failed');
+            return data.trips || [];
+        }
+
+        async function postTrip(url, trip) {
+            const res = await fetch(url, {
+                method: 'POST',
+                redirect: 'follow',
+                headers: { 'Content-Type': 'text/plain' },
+                body: JSON.stringify({ action: 'addTrip', trip })
+            });
+            const result = await readJson(res);
+            if (result.status !== 'ok') throw new Error(result.message || 'Save failed');
+            return result;
+        }
+
+        // Send locally queued trips. Returns { sent, error }.
+        async function syncPending(url, serverIds) {
+            const done = new Set();
+            let sent = 0, error = null;
+            for (const t of getPending()) {
+                const id = String(t.id);
+                if (serverIds.has(id)) { done.add(id); continue; } // already reached the sheet
+                try {
+                    await postTrip(url, t);
+                    done.add(id);
+                    sent++;
+                } catch (e) {
+                    error = e;
+                    break; // keep this and the rest for the next sync
+                }
+            }
+            // Re-read so trips queued while we were syncing are kept
+            setPending(getPending().filter(t => !done.has(String(t.id))));
+            return { sent, error };
+        }
+
+        function loadTrips() {
+            if (!getScriptUrl()) return Promise.resolve();
+            if (syncInFlight) return syncInFlight;
+            syncInFlight = doLoadTrips().finally(() => { syncInFlight = null; });
+            return syncInFlight;
+        }
+
+        async function doLoadTrips() {
             const url = getScriptUrl();
-            if (!url) return;
             setStatus('Syncing...', 'offline');
             try {
-                const res = await fetch(url + '?action=getAll');
-                const data = await res.json();
-                allTrips = data.trips || [];
-                localStorage.setItem('carpoolTripsLocal', JSON.stringify(allTrips));
-                setStatus('Connected • ' + allTrips.length + ' trips', 'online');
+                let serverTrips = await fetchTrips(url);
+                localStorage.setItem('carpoolTripsLocal', JSON.stringify(serverTrips));
+                let syncError = null;
+                if (getPending().length > 0) {
+                    const r = await syncPending(url, new Set(serverTrips.map(t => String(t.id))));
+                    syncError = r.error;
+                    if (r.sent > 0) {
+                        serverTrips = await fetchTrips(url);
+                        localStorage.setItem('carpoolTripsLocal', JSON.stringify(serverTrips));
+                    }
+                }
+                const pending = getPending();
+                allTrips = serverTrips.concat(pending);
+                if (syncError) {
+                    reportFailure(syncError, pending.length);
+                } else {
+                    setStatus('Connected • ' + serverTrips.length + ' trips' +
+                        (pending.length > 0 ? ' • ' + pending.length + ' pending' : ''), 'online');
+                }
                 renderHistory();
             } catch (e) {
-                setStatus('Offline mode', 'error');
-                allTrips = JSON.parse(localStorage.getItem('carpoolTripsLocal') || '[]');
+                reportFailure(e, getPending().length);
+                allTrips = JSON.parse(localStorage.getItem('carpoolTripsLocal') || '[]').concat(getPending());
                 renderHistory();
             }
         }
@@ -349,27 +467,22 @@
 
             try {
                 setStatus('Saving...', 'offline');
-                const res = await fetch(url, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'text/plain' },
-                    body: JSON.stringify({ action: 'addTrip', trip })
-                });
-                const result = await res.json();
-                if (result.status === 'ok') {
-                    conf.style.display = 'block';
-                    conf.textContent = `✅ Saved! ₹${perPerson.toFixed(0)}/person (${riders.length} riders)`;
-                    conf.style.color = '#27ae60';
-                    setTimeout(() => conf.style.display = 'none', 3000);
-                    loadTrips();
-                }
+                await postTrip(url, trip);
+                conf.style.display = 'block';
+                conf.textContent = `✅ Saved! ₹${perPerson.toFixed(0)}/person (${riders.length} riders)`;
+                conf.style.color = '#27ae60';
+                setTimeout(() => conf.style.display = 'none', 3000);
+                // Wait for any sync that started before the save, then reload
+                Promise.resolve(syncInFlight).then(() => loadTrips());
             } catch (e) {
-                allTrips.push({...trip, riders: riders});
-                localStorage.setItem('carpoolTripsLocal', JSON.stringify(allTrips));
+                setPending([...getPending(), trip]); // queued; sent by the next loadTrips
+                allTrips.push(trip);
                 conf.style.display = 'block';
                 conf.textContent = '⚠️ Saved locally (will sync when online)';
                 conf.style.color = '#856404';
                 setTimeout(() => conf.style.display = 'none', 4000);
-                setStatus('Offline mode', 'error');
+                reportFailure(e, getPending().length);
+                renderHistory();
             }
         }
 
@@ -384,6 +497,9 @@
 
         // Refresh on page focus
         window.addEventListener('focus', () => { if (getScriptUrl()) loadTrips(); });
+
+        // Send queued trips as soon as the phone is back online
+        window.addEventListener('online', () => { if (getScriptUrl()) loadTrips(); });
 
         // ===== UI =====
         function toggleRider(el) {

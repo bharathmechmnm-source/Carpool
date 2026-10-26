@@ -1,4 +1,4 @@
-const CACHE_NAME = 'carpool-v2';
+const CACHE_NAME = 'carpool-v4';
 const urlsToCache = [
   './',
   './index.html',
@@ -18,16 +18,15 @@ self.addEventListener('activate', event => {
   event.waitUntil(
     caches.keys().then(keys =>
       Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)))
-    )
+    ).then(() => self.clients.claim())
   );
 });
 
 self.addEventListener('fetch', event => {
-  const url = event.request.url;
-
-  // NEVER cache Google Apps Script API calls — always go to network
-  if (url.includes('script.google.com') || url.includes('macros/s/')) {
-    event.respondWith(fetch(event.request));
+  // NEVER touch API calls (Google Apps Script) or non-GET requests —
+  // let the browser handle them natively (no respondWith, no caching)
+  if (event.request.method !== 'GET' ||
+      new URL(event.request.url).origin !== self.location.origin) {
     return;
   }
 
@@ -35,8 +34,10 @@ self.addEventListener('fetch', event => {
   event.respondWith(
     fetch(event.request)
       .then(response => {
-        const clone = response.clone();
-        caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
+        if (response.ok) {
+          const clone = response.clone();
+          caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
+        }
         return response;
       })
       .catch(() => caches.match(event.request))
